@@ -1,0 +1,11 @@
+
+\section{Methodology}
+To extend the work done previously on single VMs we needed to reconfigure the system in several ways. First we needed to be able to supply access to a single Mellanox NIC to multiple VMs. We also needed to reconfigure the VMs to use virtual functions. 
+
+\subsection{Single Root I/O Virtualization (SR-IOV)}
+SR-IOV is a technology that allows a single physical PCIe device to appear as multiple virtual devices to a hypervisor. This allows us to use the Mellanox NIC across multiple VMs.
+
+\subsection{VM Configuration}
+
+\subsection{Benchmarking Code}
+We extended the previous benchmarking framework to be able to benchmark the new multi-VM case. This involved configuring and running multiple VMs simultaneously. 
