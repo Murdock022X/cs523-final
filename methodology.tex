@@ -1,11 +1,14 @@
 
 \section{Methodology}
-To extend the work done previously on single VMs we needed to reconfigure the system in several ways. First we needed to be able to supply access to a single Mellanox NIC to multiple VMs. We also needed to reconfigure the VMs to use virtual functions. 
+To extend the work done previously on single VMs we needed to reconfigure the system in several ways. Previously, all experiments were ran on a single VM that had the Mellanox NIC passed through to it. To run multiple VMs simultaneously we needed to use SR-IOV to allow the Mellanox NIC to be shared across multiple VMs. We also needed to extend our benchmarking code to be able to run benchmarks across multiple VMs simultaneously, which required significant modifications to our existing framework.
 
 \subsection{Single Root I/O Virtualization (SR-IOV)}
 SR-IOV is a technology that allows a single physical PCIe device to appear as multiple virtual devices to a hypervisor. This allows us to use the Mellanox NIC across multiple VMs.
 
 \subsection{VM Configuration}
+VM configuration in the multi-VM case is more complex than in the single VM case. Each VM is defined using a virsh XML file, which describes the hardware configuration of the VM, including the number of vCPUs, amount of memory, and the virtual devices that are attached to it. In the multi-VM case, we needed to ensure that each VM was configured correctly to use the SR-IOV virtual functions of the Mellanox NIC. This involved modifying the XML files for each VM to include the appropriate virtual functions. Next, the VM images needed to be copied for each VM, as sharing a single image among multiple VMs is not feasible. This required shrinking the base image to reduce the amount of disk space used, as the host filesystem had limited space available. Finally, we needed to ensure that the VMs were configured with the correct network settings. By default, each VM tries to set a static IP address, which lead to conflicts. Instead, we started the VMs at (IP HERE) and incremented the last octet for each VM to ensure that they had unique IP addresses. After these changes, each VM was able to boot successfully and use the Mellanox NIC for networking.
+
+Making these changes to the VM XML configuration file was a significant undertaking, especially since we wanted to test an arbitrary number of VMs. To alleviate this, we wrote a script that could generate the XML files for each VM based on a template. This allowed us to easily create and configure multiple VMs without having to manually edit each XML file. At the start of the experiment, the number of VMs are defined, and the script generates the appropriate XML files for each VM, which are then used to start the VMs with the correct configuration. At the termination of the benchmark script, the VMs are shut down and the XML files are undefined to minimize the amount of VM definitions on the system.
 
 \subsection{Benchmarking Code}
 We extended the previous benchmarking framework to be able to benchmark the new multi-VM case. This involved configuring and running multiple VMs simultaneously. 
