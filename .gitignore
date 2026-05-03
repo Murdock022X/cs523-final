@@ -1,0 +1,10 @@
+# Ignore all latex build files
+
+*.aux
+*.bbl
+*.blg
+*.fls
+*.log
+*.out
+*.gz
+*.fdb_latexmk
