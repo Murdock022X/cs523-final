@@ -11,4 +11,18 @@ VM configuration in the multi-VM case is more complex than in the single VM case
 Making these changes to the VM XML configuration file was a significant undertaking, especially since we wanted to test an arbitrary number of VMs. To alleviate this, we wrote a script that could generate the XML files for each VM based on a template. This allowed us to easily create and configure multiple VMs without having to manually edit each XML file. At the start of the experiment, the number of VMs are defined, and the script generates the appropriate XML files for each VM, which are then used to start the VMs with the correct configuration. At the termination of the benchmark script, the VMs are shut down and the XML files are undefined to minimize the amount of VM definitions on the system.
 
 \subsection{Benchmarking Code}
-We extended the previous benchmarking framework to be able to benchmark the new multi-VM case. This involved configuring and running multiple VMs simultaneously. 
+TODO: Maybe define the benchmark framework better in the background section?
+
+We extended the previous benchmarking framework to be able to benchmark the new multi-VM case. Since the framework was originally designed for single-vm testing, many changes had to be made to allow for multi-vm workflows. First, screen namespacing was implemented. Many of the profiling and network operations are launched in the client and host (TODO: Define client and host!) in a 'screen', which is a common linux terminal multiplexer. Each screen session runs in the background and has an ID associated with it. Screen sessions can be referenced by this ID, which allows for various operations (such as termination). Originally these screen sessions had static names and are automatically terminated at the end of the experiment. This does not work with multi-VM workflows, as name collisions will occur which can lead to errors and the premature terminations. This was alleviated by generating a unique ID on a per-experiment basis, allowing for these screen sessions to be discreet from each other. Thus, screen operations in one experiment no longer affects screen sessions in other experiments that are running in parallel. This ID is derived from the VM number, which is the order each VM was defined.
+
+TODO: Other changes, such as host script running
+
+In addition to these changes, effort was taken to mitigate the performance issues in the RX case, which can be see in the (TODO: Reference results). These changes were made to correct these issues, and to minimize the differences between RX and TX experiments.
+
+\subsubsection{aRFS}
+
+aRFS (TODO: CITE) is a method that improves network packet processing by sending packets to the network core running the application that will consume them. This improves CPU locality, which in turn results in better memory caching and utilization. TODO: Talk about how this was enabled
+
+\subsubsection{Flow Control}
+
+While debugging the performance issues, we noticed an excessive amount of packet drops are reported in the RX experiment. Each (TODO: Time period) we recorded the delta drops on the interface via ethtool and reported the stats for the duration of the RX experiment. We saw on average (TODO: Number here). These drops were observed on the physical NIC, as well as the virtual functions. One of the methods we used to minimize these drops (and hopefully improve performance) was enabling TCP flow control (TODO: Cite). Flow control allows for the receiver to communicate congestion to the transmitter, which will cause the transmitter to slow down and attempt to match the receivers throughput. While this eliminated the packet drops, we did not see any throughput improvements. 
