@@ -1,6 +1,9 @@
 \section{Results}
+\label{sec:results}
 
 \subsection{Transmit Path}
+
+We can see several interesting trends in the TX case. Clearly looking at figure \ref{fig:tx_tp} turning the vIOMMU on without vFree is catastrophic, the throughput degrades by orders of magnitude. However with vFree on the TX path achieves parity with the same setup without vIOMMU protections and it does this without any dependence on the number of VMs. So vFree works perfectly attaining optimal throughput while providing protections in multi-tenant environments. One thing is worth discussing in more detail, the case in which the vIOMMU is on but without the vFree strategy shows increasing bandwidth as a function of the number of VMs. This means that even though one VM is not able to saturate the bandwidth of the machine multiple VMs are still able to share the bandwidth quite well.
 
 \begin{figure}[h!]
     \centering
@@ -11,9 +14,11 @@
 
 \subsection{Receive Path}
 
+The RX path is more disappointing than the TX path. From figure \ref{fig:rx_tp} although vFree achieves optimal throughput for a single VM the throughput decreases as a function of the number of VMs for all methods. By doubling the number of VMs the throughput is decreased by roughly half. What is interesting here is that all the methods decrease and roughly even out in terms of throughput for more VMs although vIOMMU off does show a slight edge. With the throughput of each method being decreased roughly equally we have to conclude that the fault of the degradation in throughput has little to no dependence on the page free strategy used. 
+
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.45\textwidth]{assets/bd_viommu_rx.png}
     \caption{Throughput for the RX path}
-    \label{fig:hilbert_leaves}
+    \label{fig:rx_tp}
 \end{figure}
