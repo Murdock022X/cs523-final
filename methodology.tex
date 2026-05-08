@@ -3,7 +3,17 @@
 To extend the work done previously on single VMs we needed to reconfigure the system in several ways. Previously, all experiments were ran on a single VM that had the Mellanox NIC passed through to it. To run multiple VMs simultaneously we needed to use SR-IOV to allow the Mellanox NIC to be shared across multiple VMs. We also needed to extend our benchmarking code to be able to run benchmarks across multiple VMs simultaneously, which required significant modifications to our existing framework.
 
 \subsection{Single Root I/O Virtualization (SR-IOV)}
-SR-IOV is a technology that allows a single physical PCIe device to appear as multiple virtual devices to a hypervisor. This allows us to use the Mellanox NIC across multiple VMs.
+SR-IOV is a PCI Express standard that allows a single physical NIC to expose itself as multiple distinct virtual devices to the hypervisor. It does this through two device types: the Physical Function (PF), which is the actual hardware device with full configuration access, and Virtual Functions (VFs), which are lightweight PCIe functions that share the physical hardware but appear as independent devices. Each VF can be passed directly into a VM, giving that VM near-native I/O performance by bypassing the hypervisor's software data path.
+
+The Mellanox NIC was shared by up to 16 VMs in our experiments. Enabling SR-IOV required changes or confirmation of settings at multiple levels: 
+\begin{enumerate}
+    \item The kernel must have VT-d/IOMMU enabled
+    \item The driver for the physical function must be the $mlx5\_core$ driver
+    \item The virtual function(s) need to be created via the sysfs
+    \item The virtual function(s) need to be bound to the vfio-pci driver
+\end{enumerate}
+
+These virtual functions are then used in the virsh XML files.
 
 \subsection{VM Configuration}
 VM configuration in the multi-VM case is more complex than in the single VM case. Each VM is defined using a virsh XML file, which describes the hardware configuration of the VM, including the number of vCPUs, amount of memory, and the virtual devices that are attached to it. In the multi-VM case, we needed to ensure that each VM was configured correctly to use the SR-IOV virtual functions of the Mellanox NIC. This involved modifying the XML files for each VM to include the appropriate virtual functions. Next, the VM images needed to be copied for each VM, as sharing a single image among multiple VMs is not feasible. This required shrinking the base image to reduce the amount of disk space used, as the host filesystem had limited space available. Finally, we needed to ensure that the VMs were configured with the correct network settings. By default, each VM tries to set a static IP address, which lead to conflicts. Instead, we started the VMs at (IP HERE) and incremented the last octet for each VM to ensure that they had unique IP addresses. After these changes, each VM was able to boot successfully and use the Mellanox NIC for networking.
