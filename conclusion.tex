@@ -1,4 +1,10 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-This project is awesome.
+This paper characterizes the performance of vFree, an optimized page unmapping strategy for vIOMMUs, in multi-tenant virtualization environments with up to 16 concurrent VMs. Our evaluation reveals an asymmetry between the transmit and receive paths that has important implications for real-world deployments.
+
+On the TX path, vFree delivers on its promise: it achieves throughput parity with vIOMMU-disabled configurations regardless of the number of VMs, demonstrating that its deferred free page mechanism and optimized invalidation routines scale effectively in multi-tenant settings. This is a significant result, as it confirms that the security benefits of vIOMMU protection need not come at a performance cost for outbound traffic.
+
+The RX path tells a different story. While vFree maintains its advantage over a naive vIOMMU-enabled baseline, aggregate throughput degrades roughly proportionally as the number of VMs increases across all strategies — including the vIOMMU-off baseline. The fact that all methods degrade at the same rate strongly suggests that the bottleneck lies upstream of the page free strategy itself, likely in interrupt handling, receive queue contention, or CPU affinity under SR-IOV. Our experiments with aRFS and TCP flow control reduced packet drops but did not recover throughput, pointing to a deeper architectural bottleneck in the RX path that warrants further investigation.
+
+Future work should focus on diagnosing the RX scalability bottleneck, including profiling interrupt coalescing behavior, NIC receive queue saturation, and NUMA effects under increasing VM counts. Addressing this limitation would complete the picture for vFree as a viable drop-in solution for high-performance, security-conscious multi-tenant cloud environments.
