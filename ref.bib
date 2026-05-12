@@ -540,6 +540,25 @@ year = {2003},
   note =         "To appear",
 }
 
+@article{flowctrl,
+author = {Nagle, John},
+title = {Congestion control in IP/TCP internetworks},
+year = {1984},
+issue_date = {October 1984},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+volume = {14},
+number = {4},
+issn = {0146-4833},
+url = {https://doi.org/10.1145/1024908.1024910},
+doi = {10.1145/1024908.1024910},
+abstract = {Congestion control is a recognized problem in complex networks. We have discovered that the Department of Defense's Internet Protocol (IP), a pure datagram protocol, and Transmission Control Protocol (TCP), a transport layer protocol, when used together, are subject to unusual congestion problems caused by interactions between the transport and datagram layers. In particular, IP gateways are vulnerable to a phenomenon we call congestion collapse, especially when such gateways connect networks of widely different bandwidth. We have developed solutions that prevent congestion collapse.These problems are not generally recognized because these protocols are used most often on networks built on top of ARPANET IMP technology. ARPANET IMP based networks traditionally have uniform bandwidth, identical switching nodes, and are sized with substantial excess capacity. This excess capacity, and the ability of the IMP system to throttle the transmissions of hosts has for most IP/TCP hosts and networks, been adequate to handle congestion. With the recent split of the ARPANET into two interconnected networks and the growth of other networks with differing properties connected to the ARPANET, however, reliance on the benign properties of the IMP system is no longer enough to allow hosts to communicate rapidly and reliably. Improved handling of congestion is now mandatory for successful network operation under load.Ford Aerospace and Communications Corporation, and its parent company, Ford Motor Company, operate the only private IP/TCP long-haul network in existence today. This network connects six facilities (one in Michigan, two in California, one in Colorado, one in Texas, and one in England) some with extensive local networks. This net is cross-tied to the ARPANET but uses its own long-haul circuits; traffic between Ford facilities flows over private leased circuits, including a leased transatlantic satellite connection. All switching nodes are pure IP datagram switches with no node-to-node flow control, and all hosts run software either written or heavily modified by Ford or Ford Aerospace. Bandwidth of links in this network varies widely, from 1200 to 10,000,000 bits per second. In general, we have not been able to afford the luxury of excess long-haul bandwidth that the ARPANET possesses, and our long-haul links are heavily loaded during peak periods. Transit times of several seconds are thus common in our network.Because of our pure datagram orientation, heavy loading, and wide variation in bandwidth, we have had to solve problems that the ARPANET/MILNET community is just beginning to recognize. Our network is sensitive to suboptimal behavior by host TCP implementations, both on and off our own net. We have devoted considerable effort to examining TCP behavior under various conditions, and have solved some widely prevalent problems with TCP. We present here two problems and their solutions. Many TCP implementations have these problems; <i>if throughput is worse through an ARPANET/MILNET gateway for a given TCP implementation than throughput across a single net, there is a high probability that the TCP implementation has one or both of these problems</i>.},
+journal = {SIGCOMM Comput. Commun. Rev.},
+month = oct,
+pages = {11–17},
+numpages = {7}
+}
+
 @article{384253,
  author = {Werneck,, Renato and Setubal,, Jo\~{a}o and da Conceic\~{a}o,, Arlindo},
  title = {(old) Finding minimum congestion spanning trees},

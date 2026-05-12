@@ -31,11 +31,11 @@ In addition to these changes, effort was taken to mitigate the performance issue
 
 An important optimization for TCP is accelerated Receive Flow Steering (aRFS) ~\cite{arfs} which is a method that improves network packet processing by sending packets to the network core running the application that will consume them. This improves CPU locality, which in turn results in better memory caching behavior and CPU utilization because the data is local and the core does not need to wait for data. In order to set this up the code uses a script which takes the following steps to enable this: \begin{itemize}
     \item Stop interrupt rebalancing
-    \item Enable Recieve Packet Steering (RPS) by first setting the flow table size and then ensuring every queue has the same flow count
+    \item Enable Receive Packet Steering (RPS) by first setting the flow table size and then ensuring every queue has the same flow count
     \item Enable ntuple filtering and clear old rules
     \item Distributing the IRQ affinity across cores
 \end{itemize}
 
 \subsubsection{Flow Control}
 
-While debugging the performance issues, we noticed an excessive amount of packet drops are reported in the RX experiment. Each (TODO: Time period) we recorded the delta drops on the interface via ethtool and reported the stats for the duration of the RX experiment. We saw on average (TODO: Number here). These drops were observed on the physical NIC, as well as the virtual functions. One of the methods we used to minimize these drops (and hopefully improve performance) was enabling TCP flow control (TODO: Cite). Flow control allows for the receiver to communicate congestion to the transmitter, which will cause the transmitter to slow down and attempt to match the receivers throughput. While this eliminated the packet drops, we did not see any throughput improvements. 
+While debugging the performance issues, we noticed an excessive amount of packet drops are reported in the RX experiment. Each  we recorded the delta drops on the interface via ethtool and reported the stats for the duration of the RX experiment. We saw on average $\approx 110k$. These drops were observed on the physical NIC, as well as the virtual functions. One of the methods we used to minimize these drops (and hopefully improve performance) was enabling TCP flow control ~\cite{flowctrl}. Flow control allows for the receiver to communicate congestion to the transmitter, which will cause the transmitter to slow down and attempt to match the receivers throughput. While this eliminated the packet drops, we did not see any throughput improvements. 
