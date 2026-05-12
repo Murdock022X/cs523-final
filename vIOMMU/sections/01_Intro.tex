@@ -1,0 +1,293 @@
+\section{Introduction}
+Device pass-through
+has emerged as an essential architectural mechanism 
+for delivering near-native I/O performance 
+to Virtual Machines (VMs).
+It can be realized through direct device assignment,
+Single Root I/O Virtualization (SR-IOV)~\cite{ms_sriov_overview, intel_sriov_ethernet, amd_sriov_mxgpu}
+to the increasingly granular Scalable I/O Virtualization (Scalable IOV)~\cite{intel_scalable_iov_spec}.
+In such virtualized environments, 
+the physical Input/Output Memory Management Unit (IOMMU) 
+plays a critical role in enforcing strong isolation between guests. 
+It effectively prevents a hardware device---or a specific virtual function---assigned to one VM 
+from performing unauthorized Direct Memory Access (DMA) 
+to the memory of another.
+
+Despite these vital inter-guest safeguards, 
+traditional pass-through mechanisms 
+suffer from a lack of \emph{intra-guest protection}\cite{Amit2011vIOMMU,Tian2020coIOMMU,Lv2022LAvIOMMU}. 
+Specifically, an assigned device is granted 
+uncontrolled access to the entire guest physical address space. 
+This broad access paradigm leaves the guest operating system 
+highly vulnerable to memory corruption or data exfiltration, 
+whether originating from buggy device drivers 
+or fundamentally malicious hardware components\cite{Amit2011vIOMMU, RajapakshaIOMMU, AlexCodeInjection}.
+
+Furthermore, from a hypervisor resource management perspective, 
+device pass-through conventionally necessitates 
+the static pinning of all guest memory pages. 
+This rigid architectural requirement 
+inherently precludes memory overcommitment \cite{Wang2025ToPRI,Guo2024VPRI}, 
+thereby severely degrading overall system resource utilization.
+
+To overcome these intra-guest security vulnerabilities 
+and hypervisor management limitations, 
+a Virtualized IOMMU (vIOMMU) 
+has been proposed and studied in both literature \cite{Amit2011vIOMMU,Tian2020coIOMMU} and practice \cite{qemu_10_0,qemu_vtd}. 
+vIOMMU exposes a virtual IOMMU to the guest OS so that unmodified guest OS can defend itself against buggy device drivers and malicious hardware.
+
+However, existing vIOMMU designs
+have been reported with severe performance degradation~\cite{Wang2025ToPRI,Tian2020coIOMMU,Amit2011vIOMMU}.
+% suffer from severe performance degradation~\cite{Wang2025ToPRI,Tian2020coIOMMU}.
+Our profiling reveals that running vIOMMU may suffer from up to 90\% throughput degradation compared with no vIOMMU.
+
+\textbf{The vIOMMU Bottleneck Pivot.}
+\schaic{@Saksham, I rephrase your statement saying that the translation overhead is the bottleneck in baremetal.
+Both F\&S and DAMN 
+reduce both address translation and invalidation overhead. How can we claim that IOMMU address translation overhead was \emph{the} primary performance bottleneck? }
+% In bare-metal environments, prior IOMMU studies demonstrated
+% that IOMMU address translation overhead was the primary performance bottleneck 
+%     when enforcing strict-level security.
+In bare-metal environments, prior IOMMU studies demonstrated
+that synchronous management overheads
+---including both address translation and hardware IOTLB invalidation---were the primary performance bottlenecks.
+This is especially true when enforcing strict-level security, the highest level of security in Linux kernel,
+    which requires the immediate unmapping and IOTLB invalidation after each DMA completion.
+% Strict-level security is the highest level of security in Linux kernel; it requires immediate invalidation of IOTLB entries upon unmapping.
+Recent software optimizations have largely resolved this in bare-metal environments;
+for instance, DAMN~\cite{markuze2018damn} uses software cache pools for DMAs,
+and F\&S~\cite{Rubin2024FastSafe} batches mapping requests.
+
+However, when migrating these strict-security models to virtualized environments,
+a fundamentally new bottleneck emerges: unavoidable VM exits.
+Early vIOMMU implementations relied on shadow page tables~\cite{qemu_vtd,Amit2011vIOMMU},
+which suffered from VM exits on \emph{every} mapping and unmapping operation
+to notify the hypervisor of page table changes.
+To alleviate this, modern architectures introduced hardware-assisted nested IOMMU support~\cite{intel_vtd_spec},
+which successfully eliminates VM exits during the creation of new IOMMU mappings.
+Yet, to maintain strict-level security,
+this hardware-assisted approach still mandates an IOTLB invalidation---and thus a synchronous VM exit---at unmap time~\cite{qemu_10_0, intel_vtd_spec_caching}.
+Because the physical IOMMU invalidation queue is a shared host resource,
+allowing multiple VMs to write to it directly would lead to corruption.
+
+Consequently, the performance impact of these VM exits
+completely dominates the system's I/O throughput.
+A VM exit is inherently slow because it mandates a heavyweight hardware context switch
+that pauses guest execution and saves its architectural state,
+before trapping into the hypervisor to process the event in the host kernel.
+In our profiling, an IOTLB invalidation that triggers a VM exit
+takes between 10 to 20 microseconds.
+This is orders of magnitude slower than a bare-metal hardware invalidation and address translation,
+    which typically completes in 200 to 300 nanoseconds on modern hardware~\cite{Rubin2024FastSafe}.
+\todo{more citations}
+
+% The performance impact of these VM exits
+% dominates the performance of the system.
+% In our profiling, a VM exit triggered by IOTLB invalidation can take bewteen 10 - 20 microseconds.
+% A VM exit is inherently slow because 
+% it mandates a heavy-weight hardware context switch that pauses guest execution, 
+% saves its architectural state, and traps into the hypervisor software stack to process the event.
+
+% Intuitively, a single VM exit can consume thousands of CPU cycles,
+% whereas a native memory operation takes only tens.
+% Consequently, the per-unmap request latency increases drastically in a VM.
+% Yet, despite this massive latency spike per request,
+% the system's \emph{parallelism} remains artificially capped by legacy software synchronization,
+% preventing the system from hiding this latency.
+% Our profiling of the recent Linux kernel~\cite{linux_v6129}---which already adopts DAMN's page pool optimization---
+% shows that even with hardware-assisted nested IOMMU,
+% turning on vIOMMU still suffers up to 82\% throughput degradation
+% on the Tx datapath compared with no vIOMMU.
+
+% Recent architectures have developed dedicated support for IOMMU virtualization to address these performance challenges.
+% Early vIOMMU implementations utilized shadow page tables, which suffered from high overhead due to the frequent VM exits required for IOTLB invalidation on every mapping and unmapping operation.
+% These VM exits were necessary to notify the hypervisor and host kernel of each change\cite{Amit2011vIOMMU,qemu_vtd}.
+% To improve performance, recent architectures introduced hardware-assisted Nested IOMMU support, 
+%     which eliminates VM exits when the guest creates a new IOMMU mapping.
+% However, this approach still requires IOTLB invalidation---and thus a VM exit---at unmap time~\cite{yiliu1765qemu}.
+% This is because the IOMMU hardware is shared by all VMs, 
+% and allowing multiple VMs to independently write to the invalidation queue would lead to corruption~\cite{intel_vtd_spec}.
+
+\schaic{From previous version. Left for Tianyin's reference.\newline
+The existing software design of hardware-assisted vIOMMU faces significant challenges in balancing security and performance.
+Vanilla Linux kernel provides two invalidation policies: \emph{strict} and \emph{lazy}~\cite{linux_kernel_params}.
+The strict invalidation policy provides maximum security by immediately purging IOTLB entries upon unmapping; however, it incurs a massive performance penalty.
+% Our profiling shows that a guest VM running in strict mode achieves less than 15\% of the throughput compared to a system without vIOMMU enabled.
+The lazy invalidation policy defers invalidation and batches requests within a deferred time window.
+While more performant, this approach creates unignorable security risks regarding data confidentiality and integrity~\cite{RajapakshaIOMMU,AlexCodeInjection}.
+}
+
+% \schaic{This para is from previous version, left for Tianyin's reference.}
+\schaic{From previous version. Left for Tianyin's reference.\newline
+Other solutions attempt to optimize the software stack with driver changes but fail to close the performance gap with vIOMMU disabled.
+For instance, DAMN~\cite{markuze2018damn} uses software cache pools for DMAs to reduce invalidations but is incompatible with zero-copy networking Tx paths~\cite{markuze2018damn}.
+Similarly, F\&S~\cite{Rubin2024FastSafe} batches mapping requests but does not address the high cost of IOTLB invalidation in virtualized environments, 
+    particularly on the Tx datapath where batching is more challenging.
+Our profiling evaluates performance of recent version of Linux kernel~\cite{linux_v6129} which already adopts DAMN's page pool optimization.
+The results show that even with hardware-assisted nested IOMMU,
+    turning on vIOMMU still suffers up to 82\% throughput degradation compared with no vIOMMU.
+}
+
+\textbf{Key Insight.}
+Our analysis shows that the existing software design fails to address the performance bottleneck
+    given the expensive IOTLB invalidation in virtualized context. 
+The current IOMMU subsystem design fully serializes all concurrent unmaps on the same domain,
+    blocking future invalidation requests before the ongoing invalidatoin finishes.
+    % single hardware round-trip finishes.
+This serialization caps throughput independent of the core count.
+Worse, scaling the number of cores actively degrades throughput since it triggers extra VM exits due to lock contentions.
+This compounds hypervisor overhead and causes invalidation latency to grow super-linearly with the number of active cores.
+
+Current software designs unnecessarily conflate
+\emph{memory safety ordering} with \emph{cross-core serialization}.
+To maintain strict protection guarantees,
+it is only necessary to enforce a chronological ordering
+for a \emph{specific} memory mapping within a single thread.
+For a mapping from IO Virtual Address (IOVA) to guest physical address (GPA),
+the IOVA must be unmapped, then invalidated in the hardware IOTLB, and only then the physical page freed and reused.
+It does \emph{not} require serializing independent unmap requests across different cores.
+
+% The root cause of performance degradation comes from the VM exits required for IOTLB invalidation on the Tx unmap path.
+% Despite hardware-assisted nested translation eliminating VM exits on the mapping path,
+%     strict-mode vIOMMU protection still exhibits severe performance degradation.
+
+% With receive-side overheads largely mitigated by page pools,
+%     the primary bottleneck shifts to transmit-path unmaps,
+%     where IOTLB synchronization accounts for over 95\% of the unmap latency.
+% Because the hardware invalidation queue is a shared host resource without per-VM partitioning,
+%     every invalidation mandates a synchronous VM exit.
+
+
+\textbf{Our approach.}
+\schaic{@Saksham, I think carefully and avoid using the word "parallelism" here. 
+"parallelism" implies multi cores handling invalidation requests in parallel. But we didn't have  }
+To address these challenges, we rethink I/O memory protection mechanisms in VMs
+to enable the system to process highly concurrent invalidation requests and, thus, amortize VM exit costs.
+% To address these challenges, we rethink I/O memory protection mechanisms in VMs
+% to vastly increase effective request parallelism.
+We introduce \brand, which significantly improves vIOMMU performance
+while maintaining security parity with the strict model.
+
+First, we developed \emph{\optOne}, a technique that decouples
+the submission of invalidation requests from the actual invalidation process.
+A delegated core performs the IOTLB invalidation work,
+while other cores submit invalidation requests and wait.
+This decoupling removes the need to wait for previous invalidation to finish before generating an invalidation request,
+destroying the cross-core serialization bottleneck.
+Furthermore, it can process concurrent invalidation requests through efficient batching:
+multiple invalidation requests can be coalesced
+while the delegated core is processing a previous batch,
+drastically reducing the total number of VM exits.
+\emph{\optOne} requires zero changes to driver code;
+all modifications are contained within the IOMMU subsystem.
+
+% To address these challenges, we introduce \brand that 
+% significantly improve vIOMMU performance while maintaining security parity with the strict model.
+% First, we developed \emph{\optOne}, a technique that decouples the submission of invalidation requests from the actual invalidation process.
+% A delegated core will perform the IOTLB invalidation work, while other cores submit invalidation requests
+% and wait for their requests to finish.
+% The decoupling of request submission and invalidation also reduces lock contention, 
+%     as generating an invalidation request no longer requires holding the global lock.
+% What's more, the design enables efficient batching of invalidation requests, 
+%     as multiple invalidation requests can be coalesced together while the delegated core is processing a previous batch.
+% The coalescence of invalidation requests reduce the number of VM exits, and thus significantly improves performance.
+% \emph{\optOne} can be realized with zero change to any drive code; 
+%     all changes are contained within the IOMMU subsystem, making it broadly applicable to all drivers.
+%  offloads the invalidation process to a delegated core, 
+
+% By decoupling the request submission from the invalidation process, we ensure that only the enqueue operation remains under . 
+% By moving the IOTLB invalidation out of the locking protection, we significantly reduce lock contention, leaving only the enqueue operation under lock. 
+% This design also enables \emph{Efficient Batching}, as multiple invalidation requests can be grouped together while the delegated core is processing a previous batch.
+
+% However, to maintain the strict security model without sacrificing this newfound parallelism,
+% the driver must not free the associated memory page
+% until the asynchronous invalidation completes;
+% otherwise, a Use-After-Free vulnerability arises~\cite{RajapakshaIOMMU}.
+To maintain the strict security model, 
+the driver must wait for the IOVA invalidation to complete \emph{before} freeing the associated guest physical address (GPA) page.
+Otherwise, a the guest OS is vulnerable to data confidentiality attack\cite{RajapakshaIOMMU}.
+To enforce strict safety ordering (Unmap $\rightarrow$ Invalidate $\rightarrow$ Free)
+without forcing the CPU to synchronously wait,
+we propose the \emph{Deferred Free Page (DFP)} mechanism.
+DFP introduces a new callback-based interface in the IOMMU subsystem,
+allowing drivers to pass a callback function
+that delays physical memory cleanup until hardware invalidation is confirmed.
+With DFP, the driver can proceed immediately without waiting for the invalidation to complete
+while still preserving strict security guarantees.
+% The cominbation of DFP and \optOne can enable the system to process more DMA packets since it spends less time in IOMMU subsystem.
+% and, thus, improve the throughput without sacrificing strict security guarantees.
+The cominbation of DFP and \optOne can enable the system to process more I/O requests and produce higher throughput
+since the CPU spends significantly less time blocked in the IOMMU subsystem.
+
+% However, simply delegating invalidation is not enough. 
+% To maintain the strict security model, 
+% the driver must wait for the invalidation to complete \emph{before} freeing the associated memory page to prevent data integrity and confidentiality issues.
+% Drivers assume that a page that is logically unmapped is also physically unmapped, 
+%     so the drivers may release the physical page before the hardware invalidation actually finishes.
+% This can lead to security issues if the page is reused for a different purpose (e.g. store password) before the invalidation completes,
+%     as the device could still access the page through DMA~\cite{RajapakshaIOMMU}.
+% We remove the waiting time without lose of strict garrantee through
+%     \emph{Deferred Free Page (DFP)} mechanism.
+% Refactoring all drivers to handle this is impractical due to missing IOMMU subsystem interface and engineering scale. 
+% To solve this, we propose the \emph{Deferred Free Page (DFP)} mechanism. 
+% DFP introduces a new callback-based interface in the IOMMU subsystem.
+% This allows drivers to pass a callback function and delay the physical memory cleanup until the hardware invalidation is confirmed;
+%     as a result, the driver can proceed without waiting for the invalidation to complete, while still maintaining the strict security model.
+% This technique is broadly applicable and compatible with both lazy and \optOne modes.
+% With DFP combined with \optOne, we can achieve close-to-no-vIOMMU performance while maintaining the strict security model.
+
+We implement \brand on top of Linux kernel 6.12.9
+with fewer than 1.5k lines of code changed (only 373 lines in the device driver).
+\brand achieves close-to-no-vIOMMU performance
+while maintaining the strict security model,
+yielding up to a 7x throughput improvement over the baseline strict model.
+
+\textbf{Summary.} This paper makes the following contributions:
+\begin{itemize}
+    \item \textbf{Overhead characterization:} We provide a detailed analysis of the inefficiencies in existing vIOMMU designs,
+    identifying cross-core serialization as the root cause of performance degradation under VM exit latency.
+    \item \textbf{Close-to-no-vIOMMU performance:} We demonstrate that \brand achieves near-native performance
+    by enabling the system to process highly concurrent invalidation requests and minimize blocking time in IOMMU subsystem.
+    \item \textbf{Strict-level security:} We quantify the practical security compromises of non-strict policies
+    and demonstrate that \brand achieves the highest level of security without sacrificing performance.
+    \item \textbf{Evaluations on modern hardware:} We evaluate \brand on the latest hardware
+    with nested translation support using high-end 400 Gbps networking workloads.
+    \item \textbf{Open-source commitment:} We release our modified guest OS,
+    experimental framework, and full implementation artifacts to support reproducibility.
+\end{itemize}
+% \begin{itemize}
+%     % \item We identify the root cause of performance degradation in existing vIOMMU designs and analyze the security implications of different invalidation policies.
+%     % \item We design \brand, a novel vIOMMU design that significantly improves performance while maintaining strict security guarantees.
+%     % \item We implement \brand in the Linux kernel and evaluate its performance with various workloads, demonstrating significant improvements over existing designs.
+%     \item \textbf{Overhead characterization.}
+%     We provide a detailed analysis over the isnefficiencies of existing vIOMMU designs, identifying the root cause of performance degradation.
+%     \item \textbf{Close-to-no-vIOMMU performance.}
+%     We demonstrate that \brand achieves performance close to no-vIOMMU execution while preserving strict vIOMMU-level security guarantees.
+%     \item \textbf{Strict-level security.}
+%     We quantify the practical security compromises introduced by existing non-strict IOMMU invalidation policies,
+%     and demonstrate that \brand can achieve the so far the best level of security without sacrificing performance.
+%     \item \textbf{Evaluations on modern hardwares.}
+%     We experimented \brand on most recent hardware with nested translation support and high-end 400 Gbps networking workloads.
+%     % \item \textbf{Strict-equivalent security.}
+%     % We show that \brand preserves the same security properties as strict invalidation while removing key performance bottlenecks.
+%     \item \textbf{Open-source commitment.}
+%     We release our modified guest OS, experimental framework, and full implementation artifacts to support reproducibility and community adoption.
+% \end{itemize}
+% For other drivers to opt in \brand, it only requires code change at the scale of a few hundred
+
+
+% siyuanc3@nexus01:~/vanilla-source-code/6.12.9-iommu$ git diff main > main.patch
+% siyuanc3@nexus01:~/vanilla-source-code/6.12.9-iommu$ git apply --stat main.patch
+%  drivers/iommu/dma-iommu.c                       |  143 +++---
+%  drivers/iommu/dma-iommu.h                       |   49 ++
+%  drivers/iommu/intel/cache.c                     |  597 +++++++++++++++++++++++
+%  drivers/iommu/intel/iommu.c                     |   95 ++++
+%  drivers/iommu/intel/iommu.h                     |   33 +
+%  drivers/iommu/iommu.c                           |    1 
+%  drivers/net/ethernet/mellanox/mlx5/core/en_tx.c |  373 +++++++++++++-
+%  include/linux/dma-mapping.h                     |   63 ++
+%  include/linux/iommu-dma.h                       |   11 
+%  include/linux/iommu.h                           |    8 
+%  kernel/dma/mapping.c                            |   62 ++
+%  make_and_install.sh                             |   13 +
+%  12 files changed, 1319 insertions(+), 129 deletions(-)

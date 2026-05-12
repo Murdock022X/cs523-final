@@ -1,4 +1,13 @@
 \section{Related Work}
 \label{sec:related_work}
 
-The work is based on Fast \& Safe ~\cite{10.1145/3694715.3695943} which aimed to reduce the overhead of memory protection by focusing on reduction of the IOTLB miss cost rather than just the miss rate.  
+vFree \cite{vFree} and this work has roots in Fast \& Safe ~\cite{Rubin2024FastSafe} which aimed to reduce the overhead of memory protection by focusing on reduction of the IOTLB miss cost rather than just the miss rate. 
+
+\textbf{IO Memory Protection.}
+The foundational challenge motivating this work was established by Amit et al.~\cite{Amit2011vIOMMU}, who showed that enabling strict intra-VM IO memory protection via an emulated vIOMMU reduces application throughput to a fraction of the available network bandwidth. While this was evaluated at 10~Gbps, our work and vFree~\cite{vFree} demonstrate that the problem is worse at 400~Gbps, where strict protection can cause even more severe throughput degradation due to the unavoidable VM exit incurred on every invalidation request. A long line of bare-metal work addressed the IOTLB miss cost directly~\cite{RajapakshaIOMMU, markuze2018damn, peleg2015utilizing, Markuze2016true}, culminating in Fast \& Safe~\cite{Rubin2024FastSafe}, which achieves near-zero overhead in the bare-metal case by reducing the cost of address translation. However, as vFree~\cite{vFree} observes, these techniques do not transfer cleanly to virtualized environments: in a VM, the VM exit cost dominates and cannot be eliminated by translation optimizations alone, requiring a fundamentally different approach.
+
+\textbf{vFree in Single-VM Environments.}
+vFree~\cite{vFree} addresses the VM exit bottleneck through two complementary mechanisms: one-for-many invalidations, which amortize a single IR-SUB operation across multiple concurrently prepared invalidation requests, and deferred free page. Together these techniques achieve performance very close to that of an unprotected baseline at the cost of one dedicated core, evaluated across NGINX, Redis, and SPDK workloads. Our work extends this evaluation to multi-tenant environments, showing vFree's behavior under conditions representative of real cloud deployments.
+
+\textbf{SR-IOV and Multi-Tenant Networking.}
+SR-IOV~\cite{amd_sriov_mxgpu, ms_sriov_overview, intel_sriov_ethernet} enables a single physical NIC to present multiple independent virtual functions to concurrent VMs, providing near-native I/O performance by bypassing the hypervisor's software datapath. Our results show that vFree's TX path scales optimally with SR-IOV across all evaluated VM counts, but reveal an unexpected RX path bottleneck that degrades aggregate throughput proportionally with VM count and is independent of the page-free strategy employed, pointing to a deeper architectural constraint.

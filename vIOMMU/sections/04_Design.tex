@@ -1,0 +1,98 @@
+\section{Design}
+\label{sec:design}
+
+\subsection{Summary and Implications}
+
+Our analysis identifies two properties of the strict vIOMMU invalidation path that together explain the observed performance degradation:
+
+\paragraphb{Unavoidable VM~exits.}
+Every IOTLB invalidation requires a VM~exit because the hardware invalidation queue is a shared host resource with no per-VM interface. This cost is inherent to the virtualized IOMMU architecture and cannot be eliminated without hardware changes.
+
+\paragraphb{Unnecessary serialization.}
+The current implementation holds the shared resource for the entire duration of the VM~exit round-trip, serializing all cores' invalidations through a single VM~exit at a time. This caps the aggregate invalidation throughput regardless of core count, and the virtualization feedback loop causes performance to degrade beyond even this cap.  The serialization is \emph{unnecessary} in the sense that the shared resource need only be held during descriptor construction and submission---not during the hardware busy-wait that follows.
+
+
+
+Together, these findings motivate our design (\S\ref{sec:design}).
+We cannot eliminate the VM~exits, but we can restructure the invalidation path to
+(1)~release the shared resource before the busy-wait, allowing multiple cores to have invalidations in flight concurrently and amortizing the VM~exit cost through batching---if $N$~cores' invalidations are batched into one submission, the fixed per-exit cost drops from~$T$ to~$T/N$; and
+(2)~remove the CPU from the completion path entirely, deferring page reclamation till IOTLB invalidation acknowledgment rather than requiring each core to stall.
+
+
+% Together, these findings motivate our design (\S\ref{sec:design}).  We cannot eliminate the VM~exits, but we can restructure the invalidation path to (1)~release the shared resource before the busy-wait, allowing multiple cores to have invalidations in flight concurrently, and (2)~amortize the VM~exit cost across cores through batching. Rather than each core independently submitting its invalidation and incurring a separate VM~exit, aggreagate pending invalidations from multiple cores into a single submission. If $N$~cores' invalidations are batched into one submission, the fixed per-exit cost is amortized across all $N$ invalidations, effectively reducing the per-invalidation cost from~$T$ to~$T/N$.
+ \rachit{(1) has two ideas: early release and batching---these should be decoupled (as in the previous version); (2) needs to be better connected to the analysis in this section (which does not talk much about page reclamation).}
+
+
+
+\tianyin{We will really need some high-level principles to 
+  present the overall techniques beyond two simple optimizations}
+
+\rachit{as written, the early part of this section does not read as if it is directly building upon the previous two sections. \textit{E.g.}, it starts with preventing page allocator from reusing physical memory, which we didn't discuss much in S2 and S3. the second paragraph introduces security concerns that we have not discussed earlier. the third paragraph is better but talks about ``free'' operations that we have not focused on much earlier; the fourth paragraph is also better but again talks about ``page reclamations'' that we have not focused on much earlier; the same for the fifth paragraph. Overall, either we should bring page free etc. more prominently earlier or restructure the discussion in early parts of this section. The text starting ``key insight'' part is nice} 
+\para{Challenges.}
+It was considered impractical to prevent Linux page allocator from reusing physical memory that backs IOVAs during their invalidation~\cite{Amit2011vIOMMU}.
+\tianyin{put challenges there -- articulating challenges is a great way to 
+  make the contributions clear}
+
+
+Strict vIOMMU mode enforces a simple security invariant: no physical page may be freed while a stale IOTLB entry for that page remains in hardware. On the receive path, this invariant protects both \emph{data integrity} (the device must not be able to modify packet data after the kernel begins security checks and initialization) and \emph{confidentiality} (the device must not be able to read sensitive data placed in a reallocated page). On the transmit path, only confidentiality is at stake: the device reads from host memory during TX DMA but does not write back, so there is no integrity concern---the risk is that after unmap, a stale IOTLB entry allows the device to read whatever the allocator places in the freed physical frame.
+
+The correct ordering on the RX data path is:\\
+
+\textbf{Correct (RX):} DMA done $\rightarrow$ Unmap $\rightarrow$ IOTLB invalidation complete $\rightarrow$ Page free/recycle\\
+
+\rachit{just to make sure: unmap and invalidation should be atomic---right?}
+
+
+The current strict-mode implementation enforces this ordering in the most direct way possible: the CPU holds a global lock, submits the invalidation descriptor, busy-waits for hardware acknowledgment, and only then returns to the driver. This approach is correct but unnecessarily restrictive---it conflates the \emph{ordering} requirement (free must follow invalidation;) with an \emph{execution} requirement (the CPU must be stalled for the entire duration).
+
+the prohibitive latency of strict mode in a vIOMMU environment comes from two tightly coupled constraints: the serialization of hardware submission via the global domain lock, and the synchronous execution stall waiting for page reclamation. 
+
+Three properties of the virtualized environment make this conflation particularly damaging. First, IOTLB invalidation is inherently serialized: only one core can submit to the hardware invalidation queue at a time, making it a single-producer resource. Second, every invalidation triggers a VM~exit, inflating the critical section by an order of magnitude compared to bare metal (\S\ref{sec:inefficiencies}).
+Third, the Linux page allocator aggressively reuses freed physical pages, so the window between IOTLB invalidation and page free must be closed precisely---prior work considered it impractical to prevent the allocator from reusing memory during the invalidation window without fundamental changes to OS memory management~\cite{Amit2011vIOMMU}.
+
+
+\textbf{Key Insight:} The security ordering constrains operations \emph{within} a single core's unmap---it does not require that one core's invalidation complete before another core can begin its own. The global lock serializes cores through the entire VM~exit round-trip, but the ordering invariant only requires that each core's page free happens after its own invalidation. This observation yields two opportunities:
+
+\paragraphb{1: Preserve per-core ordering, eliminate cross-core serialization.}
+The correct ordering requires each core to wait for its own invalidation before proceeding to page free. But there is no ordering constraint \emph{between} cores: core~A's invalidation need not complete before core~B enqueues its own. The current implementation creates an artificial cross-core dependency by holding the global lock across the hardware round-trip. We can relax this by releasing the lock immediately after descriptor enqueue, allowing multiple cores to have invalidations in flight concurrently. We can overlap invalidations across cores and batch them at the hardware level (\emph{\optOneHeading}).
+
+\paragraphb{2: Enforce ordering without blocking the CPU.}
+Even after eliminating cross-core serialization, each core still busy-waits for its own invalidation to complete---solely to ensure that page free follows invalidation. But the CPU need not be on the critical path of this ordering: if we can guarantee that the page is not returned to the allocator until after the hardware acknowledges invalidation, the CPU can proceed immediately. A callback fired upon hardware acknowledgment provides exactly this guarantee, decoupling the CPU from the completion path while preserving the free-after-invalidation ordering (\emph{Deferred Page Free}).
+
+Together, they transform the unmap path from a globally serialized, synchronous operation into a brief lock-protected enqueue followed by an immediate return, with page reclamation handled asynchronously upon hardware acknowledgment. We present each optimization in turn.
+
+% We introduce two complementary optimizations to bridge the performance gap between strict vIOMMU mode and running without a vIOMMU while maintaining strict mode's security guarantees. First, \emph{Asynchronous Invalidation} eliminates the lock serialization bottleneck in the IOMMU subsystem by decoupling invalidation enqueue from hardware completion. Second, \emph{Deferred Page Free (DPF)} eliminates the residual per-unmap stall at the driver level by replacing synchronous waiting with a callback-driven memory lifecycle. We present each optimization in turn.
+
+\subsection{\optOneHeading}
+
+Figure \ref{fig:current-design} illustrates the bottleneck in the current design. The global \emph{cache\_lock} is held across the entire hardware round-trip, fully serializing concurrent unmaps on the same domain.
+
+Our key insight is that the lock is only necessary while constructing and enqueuing the invalidation descriptor and not while waiting for the hardware to process it \rachit{should include something about safety, and point to the section that proves safety properties}. We therefore decouple these two phases. The \emph{cache\_lock} is acquired, the invalidation descriptor is pushed to the hardware queue, and the lock is immediately released. The CPU then waits for completion outside the critical section.
+
+As shown in Figure \ref{fig:async-design}, this lock decoupling enables concurrent progress across vCPUs. By dropping the lock before waiting for the hypervisor to process the queue, multiple vCPUs can independently traverse the network and storage data paths \rachit{``network and storage data paths'' comes out of the blue---is there a reason this requires to be mentioned?}, enqueuing their respective invalidation requests without stalling behind a single global barrier. 
+
+A further benefit of this decoupling is \emph{implicit batching}. If one vCPU is currently waiting for an invalidation-triggered VM exit to complete, subsequent vCPUs can enqueue their invalidation requests into the same pending queue. When the hypervisor processes the queue, it handles the entire batch, amortizing the cost of the VM exit across multiple unmap operations. \rachit{this is not entirely clear to me: if the number of invalidation requests do not change, why would this provide benefit?}
+
+To preserve strict-mode security, the unmap thread does not return to the driver until its specific invalidation sequence number has been acknowledged by the hardware \rachit{is this something that we explicitly enforce? If so, we should say that.}. This ensures that no physical page is made available for reuse while a stale IOTLB entry for that page remains in hardware, providing the same memory isolation guarantee as strict mode.
+
+To preserve strict-mode security, the unmap thread does not return to the driver until its specific invalidation sequence number has been acknowledged by the hardware \rachit{is this something that we explicitly enforce? If so, we should say that.}. This ensures that no physical page is made available for reuse while a stale IOTLB entry for that page remains in hardware. In terms of the ordering analysis above: asynchronous invalidation relaxes the cross-core serialization but preserves the per-core ordering exactly. We present the full security argument in \S\ref{sec:security}. \rachit{repetition between the last two paragraphs; which one are we keeping?}
+
+\subsection{Deferred Free Page (DFP)}
+
+\optOneHeading eliminates the lock serialization bottleneck, but a performance gap relative to vIOMMU off mode remains. Each vCPU is still forced to busy-wait for its sequence number to complete before returning control to the driver. The sole reason for this wait is to ensure the ordering: page free must follow invalidation. DFP eliminates this wait by enforcing the ordering through a different mechanism. 
+
+Rather than blocking on unmap, drivers pass a cleanup callback alongside the unmap request. The IOMMU subsystem enqueues the invalidation descriptor, records the callback, and returns immediately---the vCPU resumes processing the next packet or I/O request without waiting for hardware acknowledgment. The physical page is marked as ``pending invalidation'' and remains inaccessible to the allocator. When the hardware acknowledges completion, the IOMMU subsystem fires the callback, which returns the page to the allocator entirely in the background. The ordering invariant---free strictly after invalidation---is preserved by construction: the allocator never sees the page until the callback fires, and the callback fires only upon hardware acknowledgment. This closes the remaining execution-path stall while preserving the same security invariant as strict mode.
+
+\rachit{what is the tradeoff? extra memory footprint in the worst-case since callbacks may be processed late?}
+
+\para{Composability with \optOne.}
+DFP and \optOneHeading are complementary but independent. \optOneHeading reduces the time the global lock is held, allowing concurrent enqueue across cores. DFP eliminates the per-core busy-wait after enqueue, removing the CPU from the completion path entirely. When composed, the unmap path consists of a brief lock-protected enqueue followed by an immediate return; the page is freed asynchronously when the batched invalidation completes. Neither optimization alone fully closes the performance gap: \optOne still forces each core to busy-wait for its sequence number, and DFP alone still serializes cores through the lock during enqueue. Together, they eliminate both sources of overhead.
+
+\rachit{RACHIT STOPPED HERE}
+
+
+\para{Universal applicability.}
+Although the VM~exit amplification makes the performance impact most visible under virtualization, DFP is agnostic to the invalidation mechanism and applies broadly.
+
+On bare-metal systems with high memory latency or heavy IOMMU traffic, the same decoupling reduces the per-unmap cost. More significantly, DFP can also be composed with the existing deferred (lazy) invalidation mode, closing the known vulnerability in which pages are returned to the allocator before their stale IOTLB entries are flushed~\todo{citation deferred vulnerability}. In lazy mode, invalidations are batched until a timer or threshold fires; during this window, the freed pages may be reallocated for sensitive data while the device retains access via stale entries. DFP eliminates this window: regardless of when or how the invalidation is batched, the \texttt{cleanup\_callback} ensures that the page is not returned to the allocator until the hardware has acknowledged the flush. The NIC driver must carefully engineer the callback to match its buffer lifecycle, but the mechanism is independent of the underlying batching policy. DFP thus converts lazy mode from a known-insecure performance optimization into a safe one, without changing the batching strategy itself.
+

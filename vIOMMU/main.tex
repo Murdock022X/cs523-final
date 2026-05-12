@@ -1,0 +1,83 @@
+\documentclass[sigplan,10pt]{acmart}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\settopmatter{printfolios=true}
+\settopmatter{printacmref=false}
+
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, patterns, positioning, fit, calc}
+\newcommand*\circledx[1]{\tikz[baseline=(char.base)]{
+            \node[shape=circle,draw,inner sep=0.1pt] (char) {#1};}}
+\newcommand*\BC[1]{%
+	\begin{tikzpicture}[baseline=(C.base)]
+		\node[draw,circle,fill=black,inner sep=0.1pt](C) {\textcolor{white}{#1}};
+	\end{tikzpicture}}
+
+%%
+%% \BibTeX command to typeset BibTeX logo in the docs
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    Bib\TeX}}}
+
+\newcommand{\CodeIn}[1]{{\small \texttt{#1}}}
+
+%% end of the preamble, start of the body of the document source.
+\usepackage{subcaption}
+\usepackage{dblfloatfix}
+\usepackage{enumitem}
+\usepackage[normalem]{ulem}
+
+
+\begin{document}
+
+%%
+%% The "title" command has an optional parameter,
+%% allowing the author to define a "short title" to be used in page headers.
+\title{Fast \& Safe IO Memory Protection in VMs}
+\title{I/Owe You Better Performance: Fixing the vIOMMU Debt}
+\title{Virtually Free: Strict IO Memory Protection for Virtual Machines at Near-Zero Cost}
+\title{Virtually Free: Strict IO Memory Protection for Virtualized Environments at Near-Zero Cost}
+\title{Virtually Free: Making Strict IO Memory Protection Feasible for Virtualized Environments}
+
+
+% \newcommand{\name}{vF\&S }
+\newcommand{\name}{vFree}
+
+\input{macro}
+% NOTE: space is left intentionally to avoid eating the space after the brand name
+% \newcommand{\brand}{vF\&S }
+\newcommand{\brand}{vFree }
+\newcommand{\optOne}{one-for-many invalidation}
+\newcommand{\optOneHeading}{One-for-many Invalidation}
+
+\input{abstract}
+
+\maketitle
+\pagestyle{plain}
+
+\input{sections/intro-rachit}
+% \input{sections/intro-saksham-draft}
+% \input{sections/intro_ty}
+\input{sections/02_Background}
+\input{sections/Inefficiencies}
+% \input{sections/03_Challenges}
+% \input{sections/04_Design}
+\input{sections/design-saksham}
+% \input{sections/Security}
+\input{sections/05_Implementation}
+\input{sections/06_Evaluation_ishv1k}
+% \input{limitation}
+\input{sections/related}
+\input{sections/07_Conclusion}
+
+% \balance
+\bibliographystyle{acm}
+\bibliography{ref}
+
+\clearpage 
+\renewcommand{\balance}{}
+\appendix
+\input{appendix}
+\end{document}
+\endinput
+%%
+%% End of file `sample-sigconf.tex'.
