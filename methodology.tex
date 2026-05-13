@@ -22,12 +22,12 @@ Making these changes to the VM XML configuration file was a significant undertak
 
 \subsection{Benchmarking Code}
 We extended the previous benchmarking framework to be able to benchmark the new multi-VM case. Since the framework was originally designed for single-vm testing, many changes had to be made to allow for multi-vm workflows. First, screen namespacing was implemented. Many of the profiling and network operations are launched in the client and host in a 'screen', which is a common linux terminal multiplexer. Each screen session runs in the background and has an ID associated with it. Screen sessions can be referenced by this ID, which allows for various operations (such as termination). Originally these screen sessions had static names and are automatically terminated at the end of the experiment. This does not work with multi-VM workflows, as name collisions will occur which can lead to errors and the premature terminations. This was alleviated by generating a unique ID on a per-experiment basis, allowing for these screen sessions to be discrete from each other. Thus, screen operations in one experiment no longer affects screen sessions in other experiments that are running in parallel. This ID is derived from the VM number, which is the order each VM was defined.
-
-TODO: Other changes, such as host script running
+We made similar changes to the host setup scripts. Before our changes, the host has some attributes changed which are then reverted at the end of the experiment. This does not work in the multi-VM case, as these changes will affect all experiments that are running in parallel. To alleviate this, we implemented checks to ensure the host changes are not reverted until all experiments have completed. We do this by moving the host setup and teardown scripts outside of the benchmarking script, and instead run them at the start and end of the entire experiment suite. This way, the host changes are only made once at the start of the experiment suite, and are not reverted until all experiments have completed.
 
 In addition to these changes, effort was taken to mitigate the performance issues in the RX case, which can be see in \ref{subsec:rx_opt}. These changes were made to correct these issues, and to minimize the differences between RX and TX experiments.
 
 \subsubsection{aRFS}
+\label{subsubsec:arfs}
 
 An important optimization for TCP is accelerated Receive Flow Steering (aRFS) ~\cite{arfs} which is a method that improves network packet processing by sending packets to the network core running the application that will consume them. This improves CPU locality, which in turn results in better memory caching behavior and CPU utilization because the data is local and the core does not need to wait for data. In order to set this up the code uses a script which takes the following steps to enable this: \begin{itemize}
     \item Stop interrupt rebalancing
@@ -37,5 +37,6 @@ An important optimization for TCP is accelerated Receive Flow Steering (aRFS) ~\
 \end{itemize}
 
 \subsubsection{Flow Control}
+\label{subsubsec:flowctrl}
 
 While debugging the performance issues, we noticed an excessive amount of packet drops are reported in the RX experiment. Each  we recorded the delta drops on the interface via ethtool and reported the stats for the duration of the RX experiment. We saw on average $\approx 110k$. These drops were observed on the physical NIC, as well as the virtual functions. One of the methods we used to minimize these drops (and hopefully improve performance) was enabling TCP flow control ~\cite{flowctrl}. Flow control allows for the receiver to communicate congestion to the transmitter, which will cause the transmitter to slow down and attempt to match the receivers throughput. While this eliminated the packet drops, we did not see any throughput improvements. 
