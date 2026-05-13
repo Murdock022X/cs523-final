@@ -25,3 +25,7 @@ The RX path is more disappointing than the TX path. From figure \ref{fig:rx_tp} 
 
 \subsection{Receive Path Optimization}
 \label{subsec:rx_opt}
+
+After seeing the results of the experiment, we wanted to investigate the cause of the RX bottleneck. First, we wanted to remove some implementation differences between the RX and TX benchmarks. These changes were relatively minor, such as making the warmup time before experiments are preformed the same and removing some pre-experiment setup operations done in RX that are not preformed in TX. These changes provided minor improvements to the RX throughput, but did not change the overall trends. Next, we enabled aRFS~\ref{subsubsec:arfs}, which again improved throughput but did not change overall trends.
+
+To help explore the problem, we collected flamegraphs and measured NIC drop rates during the RX experiments. First, we put artificial limits on the clients to prevent them from overwhelming the system. This minimally helped throughput but we still saw excessive drop rates. The drop rates were minimized by enabling flow control~\ref{subsubsec:flowctrl}, but this did not improve throughput. Finally, we attempted to alter the buffer sizes used in the RX experiments, such as the receive buffer size, netdev budget, and MSI buffer size. These changes also did not improve throughput.
