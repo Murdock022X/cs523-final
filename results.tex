@@ -3,7 +3,7 @@
 
 \subsection{Transmit Path}
 
-We can see several interesting trends in the TX case. Clearly looking at figure \ref{fig:tx_tp} turning the vIOMMU on without vFree is catastrophic, the throughput degrades by orders of magnitude. However with vFree on the TX path achieves parity with the same setup without vIOMMU protections and it does this without any dependence on the number of VMs. So vFree works perfectly attaining optimal throughput while providing protections in multi-tenant environments. One thing is worth discussing in more detail, the case in which the vIOMMU is on but without the vFree strategy shows increasing bandwidth as a function of the number of VMs. This means that even though one VM is not able to saturate the bandwidth of the machine multiple VMs are still able to share the bandwidth quite well.
+We can see several interesting trends in the TX case. Clearly looking at figure \ref{fig:tx_tp} turning the vIOMMU on without vFree is catastrophic, the throughput degrades by orders of magnitude. However with vFree on the TX path achieves parity with the same setup without vIOMMU protections and it does this without any dependence on the number of VMs. So vFree works perfectly, attaining optimal throughput while providing protections in multi-tenant environments. One thing is worth discussing in more detail, the case in which the vIOMMU is on but without the vFree strategy shows increasing bandwidth as a function of the number of VMs. This means that even though one VM is not able to saturate the bandwidth of the machine multiple VMs are still able to share the bandwidth quite well.
 
 \begin{figure}[h!]
     \centering
